@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>神庙逃亡 - Temple Escape</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a2e;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;font-family:'Segoe UI',sans-serif;user-select:none;-webkit-user-select:none}
+canvas{border-radius:8px;box-shadow:0 0 40px rgba(255,170,0,.25)}
+#ui{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;display:flex;flex-direction:column;align-items:center}
+#hud{width:400px;display:flex;justify-content:space-between;padding:12px 4px;color:#ffd700;font-size:15px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,.8);flex-wrap:wrap;gap:2px}
+#hud span{background:rgba(0,0,0,.45);padding:4px 10px;border-radius:12px}
+#powerupBar{width:400px;display:flex;gap:6px;padding:0 4px;justify-content:center}
+.pw-icon{background:rgba(0,0,0,.6);padding:3px 10px;border-radius:10px;font-size:13px;font-weight:700;color:#fff;text-shadow:0 0 6px currentColor;display:none}
+#achievement{position:absolute;top:60px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,rgba(255,170,0,.9),rgba(255,140,0,.9));color:#1a1a2e;padding:8px 24px;border-radius:20px;font-size:15px;font-weight:700;opacity:0;transition:opacity .3s,top .3s;white-space:nowrap;box-shadow:0 4px 20px rgba(255,170,0,.5)}
+#achievement.show{opacity:1;top:50px}
+#startScreen,#gameOverScreen{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center;color:#fff;pointer-events:auto}
+#startScreen h1{font-size:36px;color:#ffd700;text-shadow:0 0 20px rgba(255,170,0,.6);margin-bottom:8px}
+#startScreen p,#gameOverScreen p{color:#ccc;font-size:14px;margin:4px 0}
+.btn{margin-top:18px;padding:12px 36px;font-size:18px;font-weight:700;border:none;border-radius:24px;cursor:pointer;background:linear-gradient(135deg,#ff8c00,#ffd700);color:#1a1a2e;box-shadow:0 4px 16px rgba(255,170,0,.4);transition:transform .1s}
+.btn:hover{transform:scale(1.06)}
+.btn:active{transform:scale(.96)}
+#gameOverScreen h1{font-size:32px;color:#ff4444;margin-bottom:12px}
+#gameOverScreen .stat{font-size:18px;color:#ffd700;margin:4px 0}
+#powerupLegend{margin-top:12px;color:#aaa;font-size:12px;text-align:center;line-height:1.8}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="ui">
+  <div id="hud" style="visibility:hidden">
+    <span>🏃 <span id="dist">0</span>m</span>
+    <span>🪙 <span id="coinCount">0</span></span>
+    <span>🔥 <span id="combo">x1</span></span>
+    <span>⭐ <span id="score">0</span></span>
+  </div>
+  <div id="powerupBar">
+    <span class="pw-icon" id="pwMagnet" style="color:#00e5ff">🧲 磁铁</span>
+    <span class="pw-icon" id="pwShield" style="color:#69f0ae">🛡️ 护盾</span>
+    <span class="pw-icon" id="pwDouble" style="color:#ff6e40">⚡ 双倍</span>
+    <span class="pw-icon" id="pwNitro" style="color:#e040fb">🚀 氮气</span>
+  </div>
+  <div id="achievement"></div>
+</div>
+<div id="startScreen">
+  <h1>🏛️ 神庙逃亡</h1>
+  <p>← → / 左右滑动 → 切换跑道</p>
+  <p>↑ / 上滑 → 跳跃（躲低障碍）</p>
+  <p>↓ / 下滑 → 翻滚（缩小碰撞框）</p>
+  <p style="margin-top:8px;color:#ffd700">躲避障碍 · 收集金币 · 刷新纪录</p>
+  <div id="powerupLegend">
+    🧲 磁铁 → 自动吸引金币<br>
+    🛡️ 护盾 → 抵挡一次伤害<br>
+    ⚡ 双倍 → 得分翻倍<br>
+    🚀 氮气 → 加速冲刺+无敌<br>
+    🎁 宝箱 → 随机获得一个道具
+  </div>
+  <button class="btn" id="startBtn">开始奔跑</button>
+</div>
+<div id="gameOverScreen" style="display:none">
+  <h1>💀 游戏结束</h1>
+  <div class="stat">距离: <span id="finalDist">0</span>m</div>
+  <div class="stat">金币: <span id="finalCoins">0</span></div>
+  <div class="stat">得分: <span id="finalScore">0</span></div>
+  <div class="stat" style="color:#aaa">最高纪录: <span id="finalMax">0</span></div>
+  <button class="btn" id="restartBtn">再来一次</button>
+</div>
+
+<script>
+// ─── Canvas ───
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const W = 400, H = 600;
+canvas.width = W; canvas.height = H;
+
+// ─── DOM refs ───
+const distDom = document.getElementById('dist');
+const coinDom = document.getElementById('coinCount');
+const comboDom = document.getElementById('combo');
+const scoreDom = document.getElementById('score');
+const hud = document.getElementById('hud');
+const startScreen = document.getElementById('startScreen');
+const gameOverScreen = document.getElementById('gameOverScreen');
+const finalDist = document.getElementById('finalDist');
+const finalCoins = document.getElementById('finalCoins');
+const finalScore = document.getElementById('finalScore');
+const finalMax = document.getElementById('finalMax');
+const pwMagnet = document.getElementById('pwMagnet');
+const pwShield = document.getElementById('pwShield');
+const pwDouble = document.getElementById('pwDouble');
+const pwNitro = document.getElementById('pwNitro');
+const achievementEl = document.getElementById('achievement');
+
+// ─── Audio ───
+let audioCtx;
+function initAudio(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }
+function playTone(freq,dur,type='sine',vol=.12){
+  if(!audioCtx) return;
+  const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+  o.type=type; o.frequency.value=freq;
+  g.gain.setValueAtTime(vol,audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+dur);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime+dur);
+}
+function sfxCoin(){ playTone(880,.1); setTimeout(()=>playTone(1320,.08),60); }
+function sfxHit(){ playTone(120,.3,'sawtooth',.15); }
+function sfxJump(){ playTone(440,.12,'triangle',.06); }
+function sfxSlide(){ playTone(220,.1,'triangle',.05); }
+function sfxPowerup(){ playTone(523,.08); setTimeout(()=>playTone(659,.08),60); setTimeout(()=>playTone(784,.12),120); }
+function sfxAchievement(){ playTone(660,.1); setTimeout(()=>playTone(880,.1),100); setTimeout(()=>playTone(1100,.15),200); }
+function sfxMystery(){ playTone(440,.06,'square',.08); setTimeout(()=>playTone(660,.06,'square',.08),50); setTimeout(()=>playTone(880,.1,'square',.08),100); }
+
+// ─── Constants ───
+const LANE = [100, 200, 300];
+const PLAYER_BASE_Y = 480;
+const PLAYER_W = 28;
+const PLAYER_H = 44;
+const PLAYER_H_SLIDE = 22;
+const JUMP_GRAVITY = 0.4;
+const JUMP_FORCE = -11;
+const SLIDE_DURATION = 500;
+const MAX_SPEED = 10;
+const NITRO_SPEED = 16;
+
+// ─── Game State ───
+let currentLane, prevLane, laneProgress;
+let speed, dist, coinTotal, combo, score;
+let maxScore = parseInt(localStorage.getItem('templeMax')) || 0;
+let gameOver, gameRunning;
+let obstacles, coins, particles, decorations, powerups, mysteryBoxes;
+let jumpVel, jumpY, isJumping;
+let slideTimer, isSliding;
+let lastTime, frameCount;
+let shakeTimer, shakeAmt;
+let bgOffset;
+let canMove;
+let obstacleMinDist;
+
+// Power-up state
+let magnetActive, magnetTimer;
+let shieldActive, shieldHits;
+let doubleActive, doubleTimer;
+let nitroActive, nitroTimer;
+
+// Dodge streak
+let dodgeStreak, lastDodgeY;
+
+// Achievement milestones
+let achievedMilestones;
+
+// Stars for background
+let stars;
+
+// Achievement notification
+let achTimer, achText;
+
+// Slow-mo game over
+let slowMoTimer;
+
+// Trail particles
+let trailTimer;
+
+function resetState(){
+  currentLane = 1; prevLane = 1; laneProgress = 1;
+  speed = 2.8; dist = 0; coinTotal = 0; combo = 1; score = 0;
+  gameOver = false; gameRunning = false;
+  obstacles = []; coins = []; particles = []; decorations = [];
+  powerups = []; mysteryBoxes = [];
+  jumpVel = 0; jumpY = 0; isJumping = false;
+  slideTimer = 0; isSliding = false;
+  lastTime = 0; frameCount = 0;
+  shakeTimer = 0; shakeAmt = 0;
+  bgOffset = 0;
+  canMove = true;
+  obstacleMinDist = 150;
+
+  // Power-ups reset
+  magnetActive = false; magnetTimer = 0;
+  shieldActive = false; shieldHits = 1;
+  doubleActive = false; doubleTimer = 0;
+  nitroActive = false; nitroTimer = 0;
+
+  // Dodge streak
+  dodgeStreak = 0; lastDodgeY = -999;
+
+  // Milestones
+  achievedMilestones = new Set();
+
+  // Stars
+  stars = [];
+  for(let i=0;i<60;i++){
+    stars.push({
+      x: Math.random()*W,
+      y: Math.random()*H,
+      size: Math.random()*2+.5,
+      twinkle: Math.random()*Math.PI*2,
+      speed: Math.random()*.02+.01
+    });
+  }
+
+  achTimer = 0; achText = '';
+  slowMoTimer = 0;
+  trailTimer = 0;
+}
+resetState();
+
+// ─── Achievement System ───
+const MILESTONES = [
+  { dist: 100, text: "🏃 初出茅庐 - 奔跑100m！" },
+  { dist: 500, text: "🔥 神庙飞人 - 奔跑500m！" },
+  { dist: 1000, text: "⚡ 闪电侠 - 奔跑1000m！" },
+  { dist: 2000, text: "👑 神庙之王 - 奔跑2000m！" },
+  { dist: 5000, text: "🌟 传说奔跑者 - 奔跑5000m！" },
+];
+
+function showAchievement(text){
+  achText = text;
+  achTimer = 120;
+  achievementEl.textContent = text;
+  achievementEl.classList.add('show');
+  sfxAchievement();
+  spawnParticles(W/2, 80, '#ffd700', 20);
+}
+
+function checkMilestones(){
+  MILESTONES.forEach(m => {
+    if(dist >= m.dist && !achievedMilestones.has(m.dist)){
+      achievedMilestones.add(m.dist);
+      showAchievement(m.text);
+    }
+  });
+}
+
+// ─── Particles ───
+function spawnParticles(x,y,color,count=8){
+  for(let i=0;i<count;i++){
+    particles.push({
+      x, y, vx:(Math.random()-.5)*5, vy:(Math.random()-.5)*5-2,
+      life:1, decay:.025+Math.random()*.02,
+      size:2+Math.random()*3, color
+    });
+  }
+}
+function updateParticles(){
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx; p.y+=p.vy; p.vy+=.1; p.life-=p.decay;
+    if(p.life<=0) particles.splice(i,1);
+  }
+}
+function drawParticles(){
+  particles.forEach(p=>{
+    ctx.globalAlpha=p.life;
+    ctx.fillStyle=p.color;
+    ctx.fillRect(p.x-p.size/2,p.y-p.size/2,p.size,p.size);
+  });
+  ctx.globalAlpha=1;
+}
+
+// ─── Trail particles (running dust) ───
+function spawnTrail(){
+  trailTimer++;
+  if(trailTimer%3===0){
+    const px = getPlayerX();
+    particles.push({
+      x: px + (Math.random()-.5)*16,
+      y: PLAYER_BASE_Y + PLAYER_H/2 + 2,
+      vx: (Math.random()-.5)*1.5,
+      vy: Math.random()*.5+.2,
+      life: .5, decay: .02,
+      size: 2+Math.random()*2,
+      color: nitroActive ? '#e040fb' : '#aaa'
+    });
+  }
+  if(nitroActive && trailTimer%2===0){
+    const px = getPlayerX();
+    particles.push({
+      x: px + (Math.random()-.5)*20,
+      y: PLAYER_BASE_Y + PLAYER_H/2 + 5,
+      vx: (Math.random()-.5)*3,
+      vy: Math.random()*2,
+      life: .7, decay: .03,
+      size: 3+Math.random()*3,
+      color: Math.random()>.5 ? '#e040fb' : '#ff6e40'
+    });
+  }
+}
+
+// ─── Decorations ───
+function spawnDeco(){
+  if(Math.random()<.012){
+    const side=Math.random()<.5?0:1;
+    decorations.push({ side, y:-60, type:Math.floor(Math.random()*3) });
+  }
+}
+function drawDeco(){
+  decorations.forEach(d=>{
+    d.y+=speed;
+    const x=d.side===0?12:W-12;
+    if(d.type===0){
+      ctx.fillStyle='#5a3e28'; ctx.fillRect(x-5,d.y,10,45);
+      ctx.fillStyle='#7a5e38'; ctx.fillRect(x-7,d.y,14,5); ctx.fillRect(x-7,d.y+40,14,5);
+    } else if(d.type===1){
+      ctx.fillStyle='#5a3e28'; ctx.fillRect(x-2,d.y+8,5,28);
+      ctx.fillStyle='#ff8c00'; ctx.beginPath();
+      ctx.arc(x,d.y+6,4+Math.sin(frameCount*.3)*1.5,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#ffd700'; ctx.beginPath();
+      ctx.arc(x,d.y+6,2.5,0,Math.PI*2); ctx.fill();
+    } else {
+      ctx.fillStyle='#2d5a1e'; ctx.beginPath(); ctx.arc(x,d.y+8,8,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#3a7a28'; ctx.beginPath(); ctx.arc(x+2,d.y+6,5,0,Math.PI*2); ctx.fill();
+    }
+  });
+  decorations=decorations.filter(d=>d.y<H+60);
+}
+
+// ─── Obstacles ───
+function spawnObs(){
+  if(obstacles.length > 0){
+    const maxY = Math.max(...obstacles.map(o=>o.y));
+    if(maxY < -obstacleMinDist) return;
+  }
+  const spawnRate = Math.max(.01, .016 - dist*.000003);
+  if(Math.random() >= spawnRate) return;
+
+  const blocked=[];
+  const blockCount = Math.random()<.15 ? 2 : 1;
+  const lanes=[0,1,2];
+  for(let i=0;i<blockCount;i++){
+    const idx=Math.floor(Math.random()*lanes.length);
+    blocked.push(lanes.splice(idx,1)[0]);
+  }
+  blocked.forEach(l=>{
+    const type = Math.random()<.4 ? 'low' : 'normal';
+    obstacles.push({ lane:l, y:-50, type, w:40, h:type==='low'?20:38, dodged:false });
+  });
+}
+
+function updateObs(){
+  for(let i=obstacles.length-1;i>=0;i--){
+    obstacles[i].y += speed;
+
+    // Dodge streak tracking
+    const o = obstacles[i];
+    if(!o.dodged && o.y > PLAYER_BASE_Y + PLAYER_H){
+      o.dodged = true;
+      // Check if player was actually in danger (same lane or adjacent)
+      const playerLane = (laneProgress < 0.5) ? prevLane : currentLane;
+      if(o.lane === playerLane && (o.type === 'low' ? isJumping : o.lane !== currentLane || o.type === 'low')){
+        // Player dodged this obstacle
+        dodgeStreak++;
+        if(dodgeStreak >= 3){
+          combo = Math.min(5, combo + dodgeStreak * .1);
+          spawnParticles(getPlayerX(), PLAYER_BASE_Y - 20, '#ff6e40', 4);
+        }
+      }
+    }
+
+    if(obstacles[i].y > H+60) obstacles.splice(i,1);
+  }
+}
+
+function drawObs(){
+  obstacles.forEach(o=>{
+    const cx=LANE[o.lane];
+    if(o.type==='low'){
+      ctx.fillStyle='#c62828';
+      ctx.fillRect(cx-o.w/2, o.y, o.w, o.h);
+      ctx.fillStyle='#ff5252';
+      ctx.fillRect(cx-o.w/2+2, o.y+2, o.w-4, o.h-4);
+      ctx.fillStyle='#fff';
+      ctx.fillRect(cx-3, o.y+3, 6, o.h-6);
+      ctx.fillStyle='rgba(255,255,255,.7)';
+      ctx.font='10px sans-serif'; ctx.textAlign='center';
+      ctx.fillText('↑', cx, o.y+14);
+    } else {
+      const g=ctx.createLinearGradient(cx-20,o.y,cx+20,o.y+o.h);
+      g.addColorStop(0,'#795548'); g.addColorStop(1,'#4e342e');
+      ctx.fillStyle=g;
+      ctx.fillRect(cx-o.w/2, o.y, o.w, o.h);
+      ctx.strokeStyle='#5d4037'; ctx.lineWidth=1;
+      ctx.strokeRect(cx-14,o.y+5,10,10);
+      ctx.strokeRect(cx+4,o.y+16,12,8);
+      ctx.fillStyle='rgba(255,255,255,.1)';
+      ctx.fillRect(cx-o.w/2,o.y,o.w,2);
+      ctx.fillStyle='rgba(255,255,255,.5)';
+      ctx.font='10px sans-serif'; ctx.textAlign='center';
+      ctx.fillText('↔', cx, o.y+22);
+    }
+  });
+}
+
+// ─── Coins ───
+function spawnCoin(){
+  if(Math.random()<.02){
+    const l=Math.floor(Math.random()*3);
+    const count=1+Math.floor(Math.random()*3);
+    for(let i=0;i<count;i++){
+      coins.push({ lane:l, y:-30-i*40, collected:false, spin:Math.random()*Math.PI*2 });
+    }
+  }
+}
+function updateCoins(){
+  const px = getPlayerX();
+  const py = PLAYER_BASE_Y + jumpY;
+
+  for(let i=coins.length-1;i>=0;i--){
+    const c = coins[i];
+
+    // Magnet effect
+    if(magnetActive){
+      const cx = LANE[c.lane];
+      const dx = px - cx;
+      const dy = py - c.y;
+      const d = Math.sqrt(dx*dx+dy*dy);
+      if(d < 150){
+        const force = (150-d)/150*4;
+        c.lane += dx*.003; // move towards player
+        c.y -= force*.3;
+      }
+    }
+
+    c.y += speed;
+    if(c.y > H+60) coins.splice(i,1);
+  }
+}
+function drawCoins(){
+  coins.forEach(c=>{
+    if(c.collected) return;
+    c.spin+=.08;
+    const cx=LANE[c.lane];
+    const scaleX=Math.cos(c.spin);
+    ctx.save();
+    ctx.translate(cx,c.y);
+    ctx.scale(Math.max(.2,Math.abs(scaleX)),1);
+    ctx.fillStyle='#ffd700';
+    ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#ff8f00';
+    ctx.beginPath(); ctx.arc(0,0,6,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='bold 9px sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('$',0,1);
+    ctx.restore();
+
+    // Collection
+    if(c.y>PLAYER_BASE_Y-30 && c.y<PLAYER_BASE_Y+PLAYER_H+10 && c.lane===currentLane){
+      c.collected=true;
+      coinTotal++;
+      let pts = 10*combo;
+      if(doubleActive) pts *= 2;
+      score+=pts;
+      sfxCoin();
+      spawnParticles(cx,c.y,'#ffd700',6);
+      combo=Math.min(5, Math.round((combo+.15)*10)/10);
+    }
+  });
+  coins=coins.filter(c=>!c.collected);
+}
+
+// ─── Power-ups ───
+const POWERUP_TYPES = ['magnet', 'shield', 'double', 'nitro'];
+const POWERUP_COLORS = { magnet:'#00e5ff', shield:'#69f0ae', double:'#ff6e40', nitro:'#e040fb' };
+const POWERUP_ICONS = { magnet:'🧲', shield:'🛡️', double:'⚡', nitro:'🚀' };
+const POWERUP_DURATIONS = { magnet:8000, shield:0, double:6000, nitro:4000 };
+
+function spawnPowerup(){
+  if(Math.random()<.002){
+    const l=Math.floor(Math.random()*3);
+    const type = POWERUP_TYPES[Math.floor(Math.random()*POWERUP_TYPES.length)];
+    powerups.push({ lane:l, y:-30, type, bob:0 });
+  }
+}
+
+function spawnMysteryBox(){
+  if(Math.random()<.002){
+    const l=Math.floor(Math.random()*3);
+    mysteryBoxes.push({ lane:l, y:-30, spin:0, glow:0 });
+  }
+}
+
+function activatePowerup(type){
+  sfxPowerup();
+  switch(type){
+    case 'magnet':
+      magnetActive=true; magnetTimer=POWERUP_DURATIONS.magnet;
+      pwMagnet.style.display='inline-block';
+      showAchievement('🧲 磁铁激活！自动吸金');
+      break;
+    case 'shield':
+      shieldActive=true; shieldHits=1;
+      pwShield.style.display='inline-block';
+      showAchievement('🛡️ 护盾激活！抵挡一次伤害');
+      break;
+    case 'double':
+      doubleActive=true; doubleTimer=POWERUP_DURATIONS.double;
+      pwDouble.style.display='inline-block';
+      showAchievement('⚡ 双倍得分！');
+      break;
+    case 'nitro':
+      nitroActive=true; nitroTimer=POWERUP_DURATIONS.nitro;
+      pwNitro.style.display='inline-block';
+      showAchievement('🚀 氮气冲刺！加速+无敌');
+      break;
+  }
+}
+
+function updatePowerups(){
+  const px = getPlayerX();
+
+  // Update timers
+  if(magnetActive){
+    magnetTimer -= 16.67;
+    if(magnetTimer<=0){ magnetActive=false; pwMagnet.style.display='none'; }
+  }
+  if(doubleActive){
+    doubleTimer -= 16.67;
+    if(doubleTimer<=0){ doubleActive=false; pwDouble.style.display='none'; }
+  }
+  if(nitroActive){
+    nitroTimer -= 16.67;
+    if(nitroTimer<=0){ nitroActive=false; pwNitro.style.display='none'; }
+  }
+
+  // Power-up items
+  for(let i=powerups.length-1;i>=0;i--){
+    const p = powerups[i];
+    p.y += speed;
+    p.bob += .1;
+
+    // Collection
+    if(p.y>PLAYER_BASE_Y-30 && p.y<PLAYER_BASE_Y+PLAYER_H+10 && p.lane===currentLane){
+      activatePowerup(p.type);
+      spawnParticles(LANE[p.lane], p.y, POWERUP_COLORS[p.type], 12);
+      powerups.splice(i,1);
+      continue;
+    }
+    if(p.y > H+60) powerups.splice(i,1);
+  }
+
+  // Mystery boxes
+  for(let i=mysteryBoxes.length-1;i>=0;i--){
+    const m = mysteryBoxes[i];
+    m.y += speed;
+    m.spin += .05;
+    m.glow = Math.sin(frameCount*.1)*.3+.7;
+
+    // Collection
+    if(m.y>PLAYER_BASE_Y-30 && m.y<PLAYER_BASE_Y+PLAYER_H+10 && m.lane===currentLane){
+      const randomType = POWERUP_TYPES[Math.floor(Math.random()*POWERUP_TYPES.length)];
+      activatePowerup(randomType);
+      sfxMystery();
+      spawnParticles(LANE[m.lane], m.y, '#fff', 16);
+      spawnParticles(LANE[m.lane], m.y, POWERUP_COLORS[randomType], 10);
+      mysteryBoxes.splice(i,1);
+      continue;
+    }
+    if(m.y > H+60) mysteryBoxes.splice(i,1);
+  }
+}
+
+function drawPowerups(){
+  powerups.forEach(p=>{
+    const cx = LANE[p.lane];
+    const bobY = Math.sin(p.bob)*4;
+    const py = p.y + bobY;
+
+    // Glow
+    ctx.fillStyle = POWERUP_COLORS[p.type];
+    ctx.globalAlpha = .2;
+    ctx.beginPath(); ctx.arc(cx, py, 18, 0, Math.PI*2); ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Box
+    ctx.fillStyle = POWERUP_COLORS[p.type];
+    ctx.beginPath(); ctx.arc(cx, py, 14, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = '14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(POWERUP_ICONS[p.type], cx, py);
+  });
+
+  // Mystery boxes
+  mysteryBoxes.forEach(m=>{
+    const cx = LANE[m.lane];
+
+    // Glow
+    ctx.fillStyle = `rgba(255,215,0,${m.glow*.3})`;
+    ctx.beginPath(); ctx.arc(cx, m.y, 20, 0, Math.PI*2); ctx.fill();
+
+    // Box body
+    ctx.save();
+    ctx.translate(cx, m.y);
+    ctx.rotate(m.spin);
+    ctx.fillStyle = '#ffd700';
+    ctx.fillRect(-12,-12,24,24);
+    ctx.strokeStyle = '#ff8f00';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-12,-12,24,24);
+    ctx.restore();
+
+    // Question mark
+    ctx.fillStyle = '#1a1a2e';
+    ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('?', cx, m.y);
+  });
+}
+
+// ─── Player ───
+function getPlayerX(){
+  if(laneProgress>=1) return LANE[currentLane];
+  const ease = laneProgress*laneProgress*(3-2*laneProgress);
+  return LANE[prevLane] + (LANE[currentLane]-LANE[prevLane])*ease;
+}
+
+function getPlayerHitbox(){
+  const px = getPlayerX();
+  const h = isSliding ? PLAYER_H_SLIDE : PLAYER_H;
+  const shrink = 4;
+  return {
+    x: px,
+    y: PLAYER_BASE_Y + jumpY,
+    w: PLAYER_W - shrink*2,
+    h: h - shrink*2,
+    left:  px - (PLAYER_W-shrink*2)/2,
+    right: px + (PLAYER_W-shrink*2)/2,
+    top:   PLAYER_BASE_Y + jumpY - h/2,
+    bot:   PLAYER_BASE_Y + jumpY + h/2
+  };
+}
+
+function drawPlayer(){
+  const cx=getPlayerX();
+  const py=PLAYER_BASE_Y+jumpY;
+  ctx.save();
+  ctx.translate(cx,py);
+
+  // Shadow
+  if(jumpY<-5){
+    ctx.fillStyle='rgba(0,0,0,.2)';
+    ctx.beginPath();
+    ctx.ellipse(0,-jumpY+PLAYER_H/2+4,14+Math.abs(jumpY)*.08,4,0,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  const h2 = isSliding ? PLAYER_H_SLIDE : PLAYER_H;
+
+  // Nitro glow
+  if(nitroActive){
+    ctx.fillStyle='rgba(224,64,251,.3)';
+    ctx.beginPath(); ctx.arc(0,0,24,0,Math.PI*2); ctx.fill();
+  }
+
+  // Shield visual
+  if(shieldActive){
+    ctx.strokeStyle=`rgba(105,240,174,${.5+Math.sin(frameCount*.1)*.3})`;
+    ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(0,0,22,0,Math.PI*2); ctx.stroke();
+  }
+
+  // Body
+  const bodyG=ctx.createLinearGradient(-12,-h2/2,12,h2/2);
+  bodyG.addColorStop(0,nitroActive?'#e040fb':'#ff8c00');
+  bodyG.addColorStop(1,nitroActive?'#9c27b0':'#e65100');
+  ctx.fillStyle=bodyG;
+  roundRect(-12,-h2/2,24,h2,5);
+
+  if(!isSliding){
+    ctx.fillStyle='#ffcc80';
+    ctx.beginPath(); ctx.arc(0,-h2/2+8,8,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#333';
+    ctx.fillRect(-3,-h2/2+6,2.5,2.5);
+    ctx.fillRect(1,-h2/2+6,2.5,2.5);
+    ctx.fillStyle='#d32f2f';
+    ctx.fillRect(-9,-h2/2+2,18,3);
+  }
+
+  if(!isSliding){
+    const legP=Math.sin(frameCount*.3)*5;
+    ctx.fillStyle='#5d4037';
+    ctx.fillRect(-8,h2/2-3,6,3+legP);
+    ctx.fillRect(2,h2/2-3,6,3-legP);
+  }
+
+  const armP=Math.sin(frameCount*.3+Math.PI)*6;
+  ctx.fillStyle='#ffcc80';
+  ctx.fillRect(-15,-4+armP,4,12);
+  ctx.fillRect(11,-4-armP,4,12);
+
+  ctx.restore();
+}
+
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.fill();
+}
+
+// ─── Road ───
+function drawRoad(){
+  // Sky gradient
+  const skyG=ctx.createLinearGradient(0,0,0,H);
+  skyG.addColorStop(0,'#1a0a2e'); skyG.addColorStop(.4,'#2d1b4e'); skyG.addColorStop(1,'#4a3050');
+  ctx.fillStyle=skyG; ctx.fillRect(0,0,W,H);
+
+  // Stars
+  stars.forEach(s=>{
+    s.twinkle += s.speed;
+    const alpha = Math.sin(s.twinkle)*.4+.6;
+    ctx.fillStyle=`rgba(255,255,255,${alpha})`;
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.size,0,Math.PI*2); ctx.fill();
+  });
+
+  // Road
+  const roadG=ctx.createLinearGradient(50,0,W-50,0);
+  roadG.addColorStop(0,'#3a3a3a'); roadG.addColorStop(.3,'#555'); roadG.addColorStop(.7,'#555'); roadG.addColorStop(1,'#3a3a3a');
+  ctx.fillStyle=roadG; ctx.fillRect(50,0,W-100,H);
+
+  ctx.fillStyle='#2a1a0a';
+  ctx.fillRect(0,0,50,H); ctx.fillRect(W-50,0,50,H);
+
+  bgOffset=(bgOffset+speed)%40;
+  ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.lineWidth=2;
+  ctx.setLineDash([20,20]); ctx.lineDashOffset=-bgOffset;
+  ctx.beginPath(); ctx.moveTo(150,0); ctx.lineTo(150,H);
+  ctx.moveTo(250,0); ctx.lineTo(250,H); ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.strokeStyle='rgba(255,200,0,.3)'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(55,0); ctx.lineTo(55,H);
+  ctx.moveTo(W-55,0); ctx.lineTo(W-55,H); ctx.stroke();
+
+  // Nitro speed lines
+  if(nitroActive){
+    ctx.strokeStyle='rgba(224,64,251,.3)'; ctx.lineWidth=1;
+    for(let i=0;i<5;i++){
+      const lx=60+Math.random()*280;
+      ctx.beginPath(); ctx.moveTo(lx,Math.random()*H); ctx.lineTo(lx,Math.random()*H); ctx.stroke();
+    }
+  }
+}
+
+// ─── Collision ───
+function checkCollision(){
+  const ph = getPlayerHitbox();
+
+  // Nitro = invincible
+  if(nitroActive) return;
+
+  const playerLane = (laneProgress < 0.5) ? prevLane : currentLane;
+
+  for(const o of obstacles){
+    if(o.lane !== playerLane) continue;
+
+    const oLeft  = LANE[o.lane] - o.w/2 + 8;
+    const oRight = LANE[o.lane] + o.w/2 - 8;
+    const oTop   = o.y + 6;
+    const oBot   = o.y + o.h - 6;
+
+    if(ph.right <= oLeft || ph.left >= oRight) continue;
+    if(isJumping && jumpVel < 0) continue;
+    if(ph.bot <= oTop) continue;
+    if(ph.bot <= oTop || ph.top >= oBot) continue;
+
+    // Shield absorbs hit
+    if(shieldActive){
+      shieldActive = false;
+      pwShield.style.display='none';
+      spawnParticles(getPlayerX(), PLAYER_BASE_Y, '#69f0ae', 20);
+      sfxHit();
+      shakeTimer=6; shakeAmt=3;
+      showAchievement('🛡️ 护盾抵挡了伤害！');
+      // Reset dodge streak on hit
+      dodgeStreak = 0;
+      return;
+    }
+
+    triggerGameOver();
+    return;
+  }
+}
+
+// ─── Game Over ───
+function triggerGameOver(){
+  if(gameOver) return;
+  gameOver=true; gameRunning=false;
+  sfxHit();
+  shakeTimer=12; shakeAmt=6;
+  spawnParticles(getPlayerX(),PLAYER_BASE_Y,'#ff4444',16);
+  slowMoTimer = 30; // slow-mo frames
+  if(score>maxScore){ maxScore=score; localStorage.setItem('templeMax',maxScore); }
+
+  // Hide power-up indicators
+  pwMagnet.style.display='none';
+  pwShield.style.display='none';
+  pwDouble.style.display='none';
+  pwNitro.style.display='none';
+}
+
+function showGameOverScreen(){
+  hud.style.visibility='hidden';
+  finalDist.innerText=Math.floor(dist);
+  finalCoins.innerText=coinTotal;
+  finalScore.innerText=score;
+  finalMax.innerText=maxScore;
+  gameOverScreen.style.display='flex';
+}
+
+// ─── Controls ───
+function moveLeft(){
+  if(gameOver||!gameRunning||!canMove) return;
+  if(currentLane>0){
+    canMove=false;
+    prevLane=currentLane;
+    currentLane--;
+    laneProgress=0;
+    setTimeout(()=>canMove=true, 120);
+  }
+}
+function moveRight(){
+  if(gameOver||!gameRunning||!canMove) return;
+  if(currentLane<2){
+    canMove=false;
+    prevLane=currentLane;
+    currentLane++;
+    laneProgress=0;
+    setTimeout(()=>canMove=true, 120);
+  }
+}
+function doJump(){
+  if(gameOver||!gameRunning||isJumping) return;
+  isJumping=true; jumpVel=JUMP_FORCE; sfxJump();
+}
+function doSlide(){
+  if(gameOver||!gameRunning||isSliding) return;
+  isSliding=true; slideTimer=SLIDE_DURATION; sfxSlide();
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft'||e.key==='a') moveLeft();
+  if(e.key==='ArrowRight'||e.key==='d') moveRight();
+  if(e.key==='ArrowUp'||e.key==='w'||e.key===' '){ doJump(); e.preventDefault(); }
+  if(e.key==='ArrowDown'||e.key==='s') doSlide();
+  if(gameOver && e.key!=='Tab'){ startGame(); }
+});
+
+let tsX, tsY;
+canvas.addEventListener('touchstart',e=>{
+  tsX=e.touches[0].clientX; tsY=e.touches[0].clientY; e.preventDefault();
+},{passive:false});
+canvas.addEventListener('touchend',e=>{
+  const dx=e.changedTouches[0].clientX-tsX;
+  const dy=e.changedTouches[0].clientY-tsY;
+  if(gameOver){ startGame(); return; }
+  if(Math.abs(dx)>Math.abs(dy)){
+    if(dx>30) moveRight(); else if(dx<-30) moveLeft();
+  } else {
+    if(dy<-30) doJump(); else if(dy>30) doSlide();
+  }
+  e.preventDefault();
+},{passive:false});
+
+document.getElementById('startBtn').addEventListener('click',startGame);
+document.getElementById('restartBtn').addEventListener('click',startGame);
+
+// ─── Start ───
+function startGame(){
+  initAudio();
+  resetState();
+  gameRunning=true;
+  startScreen.style.display='none';
+  gameOverScreen.style.display='none';
+  hud.style.visibility='visible';
+  lastTime=performance.now();
+  requestAnimationFrame(gameLoop);
+}
+
+// ─── Main Loop ───
+function gameLoop(now){
+  const dt=Math.min(now-lastTime,33);
+  lastTime=now;
+  frameCount++;
+
+  ctx.save();
+  if(shakeTimer>0){
+    shakeTimer--;
+    ctx.translate((Math.random()-.5)*shakeAmt,(Math.random()-.5)*shakeAmt);
+    shakeAmt*=.9;
+  }
+
+  drawRoad();
+  spawnDeco();
+  drawDeco();
+
+  if(gameRunning){
+    // Lane transition
+    if(laneProgress<1){
+      laneProgress+=.12;
+      if(laneProgress>=1){ laneProgress=1; prevLane=currentLane; }
+    }
+
+    // Jump physics
+    if(isJumping){
+      jumpVel+=JUMP_GRAVITY;
+      jumpY+=jumpVel;
+      if(jumpY>=0){ jumpY=0; jumpVel=0; isJumping=false; }
+    }
+
+    // Slide timer
+    if(isSliding){
+      slideTimer-=dt;
+      if(slideTimer<=0) isSliding=false;
+    }
+
+    // Speed ramp
+    const currentSpeed = nitroActive ? NITRO_SPEED : Math.min(MAX_SPEED, 2.8+dist*.002);
+    speed = currentSpeed;
+    dist+=speed*.08;
+
+    // Combo decay
+    if(combo>1) combo=Math.max(1, combo-.0008);
+
+    // Score
+    let scoreAdd = Math.floor(speed*combo*.5);
+    if(doubleActive) scoreAdd *= 2;
+    score+=scoreAdd;
+
+    // Spawn & update
+    spawnObs();
+    spawnCoin();
+    spawnPowerup();
+    spawnMysteryBox();
+    updateObs();
+    updateCoins();
+    updatePowerups();
+    drawObs();
+    drawCoins();
+    drawPowerups();
+    checkCollision();
+    checkMilestones();
+
+    // Trail particles
+    spawnTrail();
+
+    // UI
+    distDom.innerText=Math.floor(dist);
+    coinDom.innerText=coinTotal;
+    comboDom.innerText='x'+combo.toFixed(1);
+    scoreDom.innerText=score;
+  }
+
+  drawPlayer();
+  updateParticles();
+  drawParticles();
+
+  // Achievement notification fade
+  if(achTimer>0){
+    achTimer--;
+    if(achTimer<=0){
+      achievementEl.classList.remove('show');
+    }
+  }
+
+  ctx.restore();
+
+  // Slow-mo after game over
+  if(slowMoTimer>0){
+    slowMoTimer--;
+    if(slowMoTimer<=0){
+      showGameOverScreen();
+      return;
+    }
+    // Continue drawing for slow-mo effect
+    requestAnimationFrame(gameLoop);
+    return;
+  }
+
+  if(!gameOver) requestAnimationFrame(gameLoop);
+}
+
+// Initial draw
+drawRoad();
+</script>
+</body>
+</html>
